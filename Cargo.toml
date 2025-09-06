@@ -15,9 +15,6 @@ ovmf-prebuilt = "0.1.0-alpha.1"
 
 
 
-[[bin]]
-name = "emos"
-path = "src/main.rs"
 
 [profile.dev]
 panic = "abort"
