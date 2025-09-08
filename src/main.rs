@@ -16,6 +16,7 @@ entry_point!(kernel_main);
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     use emos::allocator;
     use emos::memory::{self, BootInfoFrameAllocator};
+    use emos::scheduler;
     use x86_64::VirtAddr;
 
     println!("Welcome to EMOS!{}", "!");
@@ -26,6 +27,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+
+    scheduler::init_pit(100);            // PIT at 100Hz
+    scheduler::spawn_demo_tasks();       // Spawn demo tasks
 
     #[cfg(test)]
     test_main();
@@ -50,9 +54,9 @@ fn panic(info: &PanicInfo) -> ! {
     emos::test_panic_handler(info)
 }
 
-// async fn async_number() -> u32 {
-//     42
-// }
+async fn async_number() -> u32 {
+    42
+}
 
 async fn example_task() {
     let number = async_number().await;
