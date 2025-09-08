@@ -1,0 +1,7 @@
+for bootloader version 0.9:
+
+run:
+cargo bootimage
+
+then:
+cargo run

@@ -1,7 +1,13 @@
 [build]
-target = "x86_64-unknown-none"
+target = "x86_64-emos.json"
+
+[target.x86_64-emos.json]
+linker = "rust-lld"
+
+
+[target.x86_64-emos]
+runner = "bootimage runner"
 
 [unstable]
-# enable the unstable artifact-dependencies feature, see
-# https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#artifact-dependencies
-bindeps = true
+build-std = ["core", "compiler_builtins", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
