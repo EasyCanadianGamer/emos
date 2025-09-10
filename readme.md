@@ -4,7 +4,7 @@ EMOS is a hobby OS, made in Rust. Underneath the EMOS is its microkernel that ru
 
 ## To-Do list
 
-* [ ] Build the Microkernel
+* [X] Build the Microkernel
 * [ ] Shell
 * [ ] some other stuff idk yet never thought I'll get this far
 
