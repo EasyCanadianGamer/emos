@@ -9,7 +9,6 @@ use lazy_static::lazy_static;
 use spin::Mutex;
 
 /// FAT-inspired File System Service - Handles file operations
-/// This is a simplified implementation inspired by FAT filesystem structure
 pub struct FileSystemService {
     next_cluster: AtomicU64,
     files: BTreeMap<u64, FileEntry>,
