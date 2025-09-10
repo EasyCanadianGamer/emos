@@ -1,9 +1,11 @@
 // src/interrupts.rs
-use crate::{gdt, hlt_loop, print, println};
+use crate::{gdt, hlt_loop, println, syscalls};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+
+
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -13,6 +15,7 @@ pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard,
+    Syscall = 0x80,  // System call interrupt (Linux compatible)
 }
 
 impl InterruptIndex {
@@ -43,6 +46,8 @@ lazy_static! {
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         // keyboard -> IRQ1
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
+        // syscall -> 0x80
+        idt[InterruptIndex::Syscall.as_usize()].set_handler_fn(syscall_interrupt_handler);
         idt
     };
 }
@@ -84,40 +89,79 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     }
 }
 
-
 /// Keyboard IRQ handler (IRQ1)
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
-    use spin::Mutex;
     use x86_64::instructions::port::Port;
 
-    lazy_static! {
-        static ref KEYBOARD: Mutex<Keyboard<layouts::Us104Key, ScancodeSet1>> =
-            Mutex::new(Keyboard::new(
-                ScancodeSet1::new(),
-                layouts::Us104Key,
-                HandleControl::Ignore
-            ));
-    }
-
-    let mut keyboard = KEYBOARD.lock();
     let mut port = Port::new(0x60);
-
     let scancode: u8 = unsafe { port.read() };
-    if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
-        if let Some(key) = keyboard.process_keyevent(key_event) {
-            match key {
-                DecodedKey::Unicode(character) => print!("{}", character),
-                DecodedKey::RawKey(key) => print!("{:?}", key),
-            }
-        }
-    }
 
-    // Send EOI for keyboard (IRQ1 -> PIC_1_OFFSET + 1)
+    // Forward scancode into keyboard service
+    crate::services::keyboard_service::add_scancode(scancode);
+
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }
+}
+
+
+/// System call interrupt handler (int 0x80)
+extern "x86-interrupt" fn syscall_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // Extract syscall number and arguments from registers using inline assembly
+    let (syscall_num, arg0, arg1, arg2, arg3, arg4, arg5) = unsafe {
+        let mut rax: u64;
+        let mut rdi: u64;
+        let mut rsi: u64;
+        let mut rdx: u64;
+        let mut r10: u64;
+        let mut r8: u64;
+        let mut r9: u64;
+        
+        core::arch::asm!(
+            "mov {}, rax",
+            "mov {}, rdi", 
+            "mov {}, rsi",
+            "mov {}, rdx",
+            "mov {}, r10",
+            "mov {}, r8",
+            "mov {}, r9",
+            out(reg) rax,
+            out(reg) rdi,
+            out(reg) rsi,
+            out(reg) rdx,
+            out(reg) r10,
+            out(reg) r8,
+            out(reg) r9,
+            options(nomem, nostack)
+        );
+        
+        (rax, rdi, rsi, rdx, r10, r8, r9)
+    };
+
+    let args = syscalls::SyscallArgs {
+        arg0,
+        arg1,
+        arg2,
+        arg3,
+        arg4,
+        arg5,
+    };
+
+    // Handle the syscall
+    let result = syscalls::handle_syscall(syscall_num, args);
+    
+    // Set return value in RAX using inline assembly
+    let return_value: u64 = result.into();
+    unsafe {
+        core::arch::asm!(
+            "mov rax, {}",
+            in(reg) return_value,
+            options(nomem, nostack)
+        );
+    }
+    
+    println!("[SYSCALL] Syscall {} result: 0x{:x}", syscall_num, return_value);
 }
 
 #[test_case]

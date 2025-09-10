@@ -16,6 +16,8 @@ pub mod serial;
 pub mod task;
 pub mod vga_buffer;
 pub mod scheduler;
+pub mod syscalls;
+pub mod services;
 
 pub fn init() {
     gdt::init();
