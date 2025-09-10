@@ -18,6 +18,10 @@ pub mod vga_buffer;
 pub mod scheduler;
 pub mod syscalls;
 pub mod services;
+pub mod process;
+pub mod tests;
+pub mod interactive_tests;
+pub mod simple_tests;
 
 pub fn init() {
     gdt::init();

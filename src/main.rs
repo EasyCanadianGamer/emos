@@ -6,6 +6,7 @@
 
 extern crate alloc;
 
+use alloc::string::ToString;
 use emos::println;
 use emos::task::{Task, executor::Executor};
 use emos::services::keyboard_service;
@@ -40,6 +41,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     // Test services
     test_services();
+    
+    // Run simple microkernel tests
+    emos::simple_tests::run_simple_tests();
 
     #[cfg(test)]
     test_main();
@@ -59,11 +63,17 @@ fn initialize_services() {
     println!("VGA service initialized");
     
     // Initialize memory service
-    // Note: In a real implementation, you'd pass the actual frame allocator and mapper
     println!("Memory service initialized");
     
-    // Initialize file system service
-    println!("File system service initialized");
+    // Initialize FAT filesystem service
+    match emos::services::file_system_service::init_fat_filesystem() {
+        Ok(_) => println!("FAT filesystem service initialized"),
+        Err(e) => println!("FAT filesystem initialization failed: {:?}", e),
+    }
+    
+    // Initialize process management service
+    emos::services::process_service::init_process_service();
+    println!("Process management service initialized");
     
     println!("All services initialized successfully!");
 }
@@ -75,8 +85,11 @@ fn test_services() {
     // Test memory service
     test_memory_service();
     
-    // Test file system service
-    test_file_system_service();
+    // Test FAT-inspired filesystem service
+    test_fat_inspired_filesystem_service();
+    
+    // Test process management service
+    test_process_management_service();
     
     println!("Service tests completed!");
 }
@@ -100,27 +113,27 @@ fn test_memory_service() {
     }
 }
 
-/// Test file system service functionality
-fn test_file_system_service() {
+/// Test FAT-inspired filesystem service functionality
+fn test_fat_inspired_filesystem_service() {
     use emos::services::file_system_service::{
         create_file, write_file, read_file, list_files, FilePermissions
     };
     
-    println!("Testing file system service...");
+    println!("Testing FAT-inspired filesystem service...");
     
     // Create a test file
     match create_file("test.txt", FilePermissions::ReadWrite) {
-        Ok(inode) => {
-            println!("Created file with inode: {}", inode);
+        Ok(cluster) => {
+            println!("Created file with cluster: {}", cluster);
             
             // Write some data
-            let test_data = b"Hello, EMOS Microkernel!";
-            match write_file(inode, test_data) {
+            let test_data = b"Hello, EMOS Microkernel with FAT-inspired filesystem!";
+            match write_file(cluster, test_data) {
                 Ok(size) => {
                     println!("Wrote {} bytes to file", size);
                     
                     // Read the data back
-                    match read_file(inode) {
+                    match read_file(cluster) {
                         Ok(data) => {
                             println!("Read data: {}", core::str::from_utf8(&data).unwrap_or("Invalid UTF-8"));
                         }
@@ -133,9 +146,75 @@ fn test_file_system_service() {
         Err(e) => println!("File creation failed: {:?}", e),
     }
     
+    // Create a directory
+    match create_file("docs", FilePermissions::ReadWrite) {
+        Ok(cluster) => {
+            println!("Created directory with cluster: {}", cluster);
+        }
+        Err(e) => println!("Directory creation failed: {:?}", e),
+    }
+    
     // List files
     let files = list_files();
     println!("Files in current directory: {:?}", files);
+}
+
+/// Test process management service functionality
+fn test_process_management_service() {
+    use emos::services::process_service::{
+        create_process, terminate_process, list_processes, get_system_stats, 
+        get_current_process, schedule_next_process
+    };
+    use emos::process::pcb::ProcessPriority;
+    
+    println!("Testing process management service...");
+    
+    // Create some test processes
+    match create_process("test_proc1".to_string(), ProcessPriority::Normal, 4096, 8192) {
+        Ok(pid1) => {
+            println!("Created process 'test_proc1' with PID {}", pid1);
+            
+            // Create another process
+            match create_process("test_proc2".to_string(), ProcessPriority::High, 4096, 8192) {
+                Ok(pid2) => {
+                    println!("Created process 'test_proc2' with PID {}", pid2);
+                    
+                    // List all processes
+                    let processes = list_processes();
+                    println!("Total processes: {}", processes.len());
+                    for (pid, name, state) in processes {
+                        println!("  PID {}: {} ({:?})", pid, name, state);
+                    }
+                    
+                    // Test scheduling
+                    if let Some(next_pid) = schedule_next_process() {
+                        println!("Scheduled next process: {}", next_pid);
+                    }
+                    
+                    // Test process termination
+                    match terminate_process(pid1, 0) {
+                        Ok(_) => println!("Terminated process PID {}", pid1),
+                        Err(e) => println!("Failed to terminate process: {:?}", e),
+                    }
+                }
+                Err(e) => println!("Failed to create second process: {:?}", e),
+            }
+        }
+        Err(e) => println!("Failed to create first process: {:?}", e),
+    }
+    
+    // Get system statistics
+    let stats = get_system_stats();
+    println!("System stats: {} total processes, {} running, {} ready, {} blocked, {} terminated", 
+             stats.total_processes, stats.running_processes, stats.ready_processes, 
+             stats.blocked_processes, stats.terminated_processes);
+    
+    // Get current process
+    if let Some(current_pid) = get_current_process() {
+        println!("Current process PID: {}", current_pid);
+    } else {
+        println!("No current process");
+    }
 }
 
 /// This function is called on panic.
@@ -196,4 +275,10 @@ fn test_syscall_functionality() {
 fn test_microkernel_services() {
     // Test that services work correctly
     test_services();
+}
+
+#[test_case]
+fn test_comprehensive_microkernel() {
+    // Run comprehensive microkernel tests
+    emos::tests::run_all_tests();
 }

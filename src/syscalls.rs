@@ -1,5 +1,6 @@
 // src/syscalls.rs
 use core::fmt;
+use alloc::string::ToString;
 
 /// System call numbers
 #[repr(u64)]
@@ -47,6 +48,7 @@ pub enum SyscallError {
     NoMessageAvailable,
     InvalidMemoryRegion,
     CapabilityDenied,
+    NoCurrentProcess,
 }
 
 impl fmt::Display for SyscallError {
@@ -62,6 +64,7 @@ impl fmt::Display for SyscallError {
             SyscallError::NoMessageAvailable => write!(f, "No message available"),
             SyscallError::InvalidMemoryRegion => write!(f, "Invalid memory region"),
             SyscallError::CapabilityDenied => write!(f, "Capability denied"),
+            SyscallError::NoCurrentProcess => write!(f, "No current process"),
         }
     }
 }
@@ -130,28 +133,89 @@ pub fn syscall_deallocate_memory(args: SyscallArgs) -> SyscallResult {
 }
 
 pub fn syscall_create_process(args: SyscallArgs) -> SyscallResult {
-    // TODO: Implement process creation
-    crate::println!("[SYSCALL] CreateProcess called with args: {:?}", args);
-    SyscallResult::Success(1) // Return new process ID
+    use crate::services::process_service::create_process;
+    use crate::process::pcb::ProcessPriority;
+    
+    // Extract arguments: name_ptr, name_len, priority, stack_size, heap_size
+    let name_ptr = args.arg0 as *const u8;
+    let name_len = args.arg1 as usize;
+    let priority = match args.arg2 {
+        0 => ProcessPriority::Low,
+        1 => ProcessPriority::Normal,
+        2 => ProcessPriority::High,
+        3 => ProcessPriority::Critical,
+        _ => ProcessPriority::Normal,
+    };
+    let stack_size = args.arg3 as usize;
+    let heap_size = args.arg4 as usize;
+    
+    // Convert name from C string
+    let name = unsafe {
+        let slice = core::slice::from_raw_parts(name_ptr, name_len);
+        core::str::from_utf8(slice).unwrap_or("unknown").to_string()
+    };
+    
+    match create_process(name, priority, stack_size, heap_size) {
+        Ok(pid) => {
+            crate::println!("[SYSCALL] CreateProcess: Created process with PID {}", pid);
+            SyscallResult::Success(pid)
+        }
+        Err(e) => {
+            crate::println!("[SYSCALL] CreateProcess failed: {:?}", e);
+            SyscallResult::Error(SyscallError::ProcessNotFound)
+        }
+    }
 }
 
 pub fn syscall_exit_process(args: SyscallArgs) -> SyscallResult {
-    // TODO: Implement process exit
-    let exit_code = args.arg0;
-    crate::println!("[SYSCALL] ExitProcess called with exit code: {}", exit_code);
-    SyscallResult::Success(0)
+    use crate::services::process_service::{terminate_process, get_current_process};
+    
+    let exit_code = args.arg0 as i32;
+    
+    if let Some(current_pid) = get_current_process() {
+        match terminate_process(current_pid, exit_code) {
+            Ok(_) => {
+                crate::println!("[SYSCALL] ExitProcess: Process {} exited with code {}", current_pid, exit_code);
+                SyscallResult::Success(0)
+            }
+            Err(e) => {
+                crate::println!("[SYSCALL] ExitProcess failed: {:?}", e);
+                SyscallResult::Error(SyscallError::ProcessNotFound)
+            }
+        }
+    } else {
+        crate::println!("[SYSCALL] ExitProcess: No current process to exit");
+        SyscallResult::Error(SyscallError::NoCurrentProcess)
+    }
 }
 
 pub fn syscall_yield(_args: SyscallArgs) -> SyscallResult {
-    // TODO: Implement process yielding
+    use crate::services::process_service::schedule_next_process;
+    
     crate::println!("[SYSCALL] Yield called");
-    SyscallResult::Success(0)
+    
+    // Schedule next process
+    if let Some(next_pid) = schedule_next_process() {
+        crate::println!("[SYSCALL] Yield: Switched to process {}", next_pid);
+        SyscallResult::Success(next_pid)
+    } else {
+        crate::println!("[SYSCALL] Yield: No processes ready to run");
+        SyscallResult::Success(0)
+    }
 }
 
 pub fn syscall_get_pid(_args: SyscallArgs) -> SyscallResult {
-    // TODO: Implement get current process ID
+    use crate::services::process_service::get_current_process;
+    
     crate::println!("[SYSCALL] GetPid called");
-    SyscallResult::Success(1) // Return current process ID
+    
+    if let Some(pid) = get_current_process() {
+        crate::println!("[SYSCALL] GetPid: Current process ID is {}", pid);
+        SyscallResult::Success(pid)
+    } else {
+        crate::println!("[SYSCALL] GetPid: No current process");
+        SyscallResult::Error(SyscallError::NoCurrentProcess)
+    }
 }
 
 pub fn syscall_map_memory(args: SyscallArgs) -> SyscallResult {
