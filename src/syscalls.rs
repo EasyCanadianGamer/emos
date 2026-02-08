@@ -1,6 +1,8 @@
 // src/syscalls.rs
 use core::fmt;
 use alloc::string::ToString;
+use crate::serial;
+
 
 /// System call numbers
 #[repr(u64)]
@@ -86,23 +88,121 @@ impl From<SyscallResult> for u64 {
 pub type SyscallHandler = fn(SyscallArgs) -> SyscallResult;
 
 /// Handle a system call
-pub fn handle_syscall(syscall_num: u64, args: SyscallArgs) -> SyscallResult {
-    let syscall_args = args;
+// pub fn handle_syscall(syscall_num: u64, args: SyscallArgs) -> SyscallResult {
+//     let syscall_args = args;
     
-    match syscall_num {
-        0 => syscall_send_message(syscall_args),
-        1 => syscall_receive_message(syscall_args),
-        2 => syscall_allocate_memory(syscall_args),
-        3 => syscall_deallocate_memory(syscall_args),
-        4 => syscall_create_process(syscall_args),
-        5 => syscall_exit_process(syscall_args),
-        6 => syscall_yield(syscall_args),
-        7 => syscall_get_pid(syscall_args),
-        8 => syscall_map_memory(syscall_args),
-        9 => syscall_unmap_memory(syscall_args),
-        _ => SyscallResult::Error(SyscallError::InvalidSyscall),
+//     match syscall_num {
+//         0 => syscall_send_message(syscall_args),
+//         1 => syscall_receive_message(syscall_args),
+//         2 => syscall_allocate_memory(syscall_args),
+//         3 => syscall_deallocate_memory(syscall_args),
+//         4 => syscall_create_process(syscall_args),
+//         5 => syscall_exit_process(syscall_args),
+//         6 => syscall_yield(syscall_args),
+//         7 => syscall_get_pid(syscall_args),
+//         8 => syscall_map_memory(syscall_args),
+//         9 => syscall_unmap_memory(syscall_args),
+//         _ => SyscallResult::Error(SyscallError::InvalidSyscall),
+//     }
+// }
+pub fn handle_syscall(syscall_num: u64, args: SyscallArgs) -> SyscallResult {
+    // BRING-UP PATH (safe in interrupt/syscall context)
+    // syscall 0: read a single byte from keyboard
+    if syscall_num == 0 {
+        match syscall_read_byte() {
+            Some(byte) => return SyscallResult::Success(byte as u64),
+            None => return SyscallResult::Error(SyscallError::NoMessageAvailable),
+        }
+    }
+    // syscall 1: write a single byte in arg0 (rdi) to VGA
+    if syscall_num == 1 {
+        vga_write_byte(args.arg0 as u8);
+        return SyscallResult::Success(0);
+    }
+
+    // Everything below is NOT interrupt-safe yet (println!, alloc, services, locks, etc.)
+    SyscallResult::Error(SyscallError::InvalidSyscall)
+}
+
+pub fn vga_write_byte(byte: u8) {
+    const VGA_BUFFER: *mut u8 = 0xb8000 as *mut u8;
+    const BUFFER_WIDTH: usize = 80;
+    const BUFFER_HEIGHT: usize = 25;
+    static mut CURSOR_ROW: usize = 0;
+    static mut CURSOR_COL: usize = 0;
+    static mut INITIALIZED: bool = false;
+
+    unsafe {
+        if !INITIALIZED {
+            // Clear screen on first write
+            for i in 0..(BUFFER_WIDTH * BUFFER_HEIGHT * 2) {
+                *VGA_BUFFER.add(i) = if i % 2 == 0 { b' ' as u8 } else { 0x0f };
+            }
+            INITIALIZED = true;
+            CURSOR_ROW = 0;
+            CURSOR_COL = 0;
+        }
+
+        match byte {
+            b'\n' => {
+                CURSOR_COL = 0;
+                CURSOR_ROW += 1;
+                if CURSOR_ROW >= BUFFER_HEIGHT {
+                    // Scroll up
+                    for row in 1..BUFFER_HEIGHT {
+                        for col in 0..BUFFER_WIDTH {
+                            let src_pos = (row * BUFFER_WIDTH + col) * 2;
+                            let dst_pos = ((row - 1) * BUFFER_WIDTH + col) * 2;
+                            *VGA_BUFFER.add(dst_pos) = *VGA_BUFFER.add(src_pos);
+                            *VGA_BUFFER.add(dst_pos + 1) = *VGA_BUFFER.add(src_pos + 1);
+                        }
+                    }
+                    // Clear last row
+                    let last_row_start = (BUFFER_HEIGHT - 1) * BUFFER_WIDTH * 2;
+                    for i in 0..(BUFFER_WIDTH * 2) {
+                        *VGA_BUFFER.add(last_row_start + i) = if i % 2 == 0 { b' ' as u8 } else { 0x0f };
+                    }
+                    CURSOR_ROW = BUFFER_HEIGHT - 1;
+                }
+            }
+            b'\r' => {
+                CURSOR_COL = 0;
+            }
+            b'\x08' => {
+                // Backspace
+                if CURSOR_COL > 0 {
+                    CURSOR_COL -= 1;
+                    let pos = (CURSOR_ROW * BUFFER_WIDTH + CURSOR_COL) * 2;
+                    *VGA_BUFFER.add(pos) = b' ';
+                    *VGA_BUFFER.add(pos + 1) = 0x0f;
+                }
+            }
+            _ => {
+                if byte >= 32 && byte <= 126 {
+                    let pos = (CURSOR_ROW * BUFFER_WIDTH + CURSOR_COL) * 2;
+                    *VGA_BUFFER.add(pos) = byte;
+                    *VGA_BUFFER.add(pos + 1) = 0x0f;
+                    CURSOR_COL += 1;
+                    if CURSOR_COL >= BUFFER_WIDTH {
+                        CURSOR_COL = 0;
+                        CURSOR_ROW += 1;
+                        if CURSOR_ROW >= BUFFER_HEIGHT {
+                            CURSOR_ROW = BUFFER_HEIGHT - 1;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
+
+/// Synchronous syscall to read a byte from keyboard input.
+/// Returns Some(scancode) if available, None if not.
+/// Simple raw scancode for debugging.
+pub fn syscall_read_byte() -> Option<u8> {
+    crate::services::keyboard_service::try_get_scancode()
+}
+
 
 // Individual syscall implementations
 pub fn syscall_send_message(args: SyscallArgs) -> SyscallResult {
@@ -232,3 +332,4 @@ pub fn syscall_unmap_memory(args: SyscallArgs) -> SyscallResult {
     crate::println!("[SYSCALL] UnmapMemory called with addr: 0x{:x}", addr);
     SyscallResult::Success(0)
 }
+

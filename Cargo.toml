@@ -52,12 +52,24 @@ bench = false
 
 
 [package.metadata.bootimage]
-test-args = [
-    "-device",
-    "isa-debug-exit,iobase=0xf4,iosize=0x04",
-    "-serial",
-    "stdio",
-    "-display",
-    "none",
+run-args = [
+  "-no-reboot",
+  "-d", "int",
+  "-serial", "stdio",
+  "-vga", "std",
+  "-k", "en-us",
+  "-display", "sdl",
+  "-device", "i8042",
+  
 ]
+
+
+
+test-args = [
+  "-no-reboot",
+  "-device", "isa-debug-exit,iobase=0xf4,iosize=0xf4",
+  "-serial", "stdio",
+  "-display", "none",
+]
+
 test-success-exit-code = 33 

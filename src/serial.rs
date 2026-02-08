@@ -1,6 +1,8 @@
 use lazy_static::lazy_static;
 use spin::Mutex;
 use uart_16550::SerialPort;
+use x86_64::instructions::port::Port;
+
 
 lazy_static! {
     pub static ref SERIAL1: Mutex<SerialPort> = {
@@ -34,4 +36,21 @@ macro_rules! serial_println {
     ($fmt:expr) => ($crate::serial_print!(concat!($fmt, "\n")));
     ($fmt:expr, $($arg:tt)*) => ($crate::serial_print!(
         concat!($fmt, "\n"), $($arg)*));
+}
+
+
+#[inline(always)]
+pub fn write_byte_raw(byte: u8) {
+    unsafe {
+        // COM1 data register
+        let mut data = Port::<u8>::new(0x3F8);
+        data.write(byte);
+    }
+}
+
+#[inline(always)]
+pub fn write_str_raw(s: &str) {
+    for &b in s.as_bytes() {
+        write_byte_raw(b);
+    }
 }

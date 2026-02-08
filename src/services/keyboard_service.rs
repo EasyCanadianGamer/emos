@@ -29,6 +29,17 @@ pub(crate) fn add_scancode(scancode: u8) {
     }
 }
 
+/// Try to get a scancode from the queue without blocking.
+/// Returns Some(scancode) if available, None if queue is empty.
+/// This is safe to call from interrupt/syscall context.
+pub fn try_get_scancode() -> Option<u8> {
+    if let Ok(queue) = SCANCODE_QUEUE.try_get() {
+        queue.pop()
+    } else {
+        None
+    }
+}
+
 pub struct ScancodeStream {
     _private: (),
 }

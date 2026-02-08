@@ -22,11 +22,17 @@ pub mod process;
 pub mod tests;
 pub mod interactive_tests;
 pub mod simple_tests;
+pub mod userspace;
 
 pub fn init() {
     gdt::init();
     interrupts::init_idt();
-    unsafe { interrupts::PICS.lock().initialize() };
+    unsafe { 
+        interrupts::PICS.lock().initialize();
+        // Explicitly unmask IRQ1 (keyboard)
+        interrupts::PICS.lock().write_masks(0xfe, 0xff);
+    };
+    interrupts::print_pic_masks();
     x86_64::instructions::interrupts::enable();
 }
 pub trait Testable {

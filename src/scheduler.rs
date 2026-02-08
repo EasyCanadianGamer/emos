@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use core::cell::RefCell;
-use core::future::Future;
+use core::future::{Future, poll_fn};
 use core::pin::Pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use spin::Mutex;
@@ -71,19 +71,29 @@ pub fn spawn(task: Task) {
     TASK_QUEUE.lock().borrow_mut().push_back(task);
 }
 
+/// Yield control back to the scheduler.
+/// This future will always return Poll::Pending, allowing other tasks to run.
+pub async fn yield_task() {
+    poll_fn(|_| Poll::Pending).await
+}
+
 /// Add some demo tasks.
 pub fn spawn_demo_tasks() {
     spawn(Task::new(async {
-        for i in 0.. {
+        let mut i = 0;
+        loop {
             print!("[A{}]", i);
-            crate::hlt_loop();
+            i += 1;
+            yield_task().await; // Yield control back to scheduler
         }
     }));
 
     spawn(Task::new(async {
-        for i in 0.. {
+        let mut i = 0;
+        loop {
             print!("[B{}]", i);
-            crate::hlt_loop();
+            i += 1;
+            yield_task().await; // Yield control back to scheduler
         }
     }));
 }
